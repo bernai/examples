@@ -30,10 +30,12 @@ parser.add_argument('--temperature', type=float, default=1.0,
                     help='temperature - higher will increase diversity')
 parser.add_argument('--log-interval', type=int, default=100,
                     help='reporting interval')
+parser.add_argument('--strategy', type=str, default='sampling', choices=['sampling', 'greedy'],
+                    help='choose between sampling and greedy search')  # add strategy argument
 args = parser.parse_args()
 
 # Set the random seed manually for reproducibility.
-torch.manual_seed(args.seed)
+torch.manual_seed(args.seed)  # if seed is changed, output is changed
 if torch.cuda.is_available():
     if not args.cuda:
         print("WARNING: You have a CUDA device, so you should probably run with --cuda")
@@ -44,7 +46,7 @@ if args.temperature < 1e-3:
     parser.error("--temperature has to be greater or equal 1e-3")
 
 with open(args.checkpoint, 'rb') as f:
-    model = torch.load(f).to(device)
+    model = torch.load(f).to(device)  # load to cpu if not --cuda
 model.eval()
 
 corpus = data.Corpus(args.data)
@@ -53,7 +55,7 @@ ntokens = len(corpus.dictionary)
 is_transformer_model = hasattr(model, 'model_type') and model.model_type == 'Transformer'
 if not is_transformer_model:
     hidden = model.init_hidden(1)
-input = torch.randint(ntokens, (1, 1), dtype=torch.long).to(device)
+input = torch.randint(ntokens, (1, 1), dtype=torch.long).to(device)  # random tensor with int; tensor([[2]])
 
 with open(args.outf, 'w') as outf:
     with torch.no_grad():  # no tracking history
@@ -67,7 +69,12 @@ with open(args.outf, 'w') as outf:
             else:
                 output, hidden = model(input, hidden)
                 word_weights = output.squeeze().div(args.temperature).exp().cpu()
-                word_idx = torch.multinomial(word_weights, 1)[0]
+                if args.strategy == 'sampling':
+                    word_idx = torch.multinomial(word_weights, 1)[0]
+                else:
+                    probs = list(enumerate(word_weights))
+                    probs.sort(key=lambda x: x[1], reverse=True)  # sort descending
+                    word_idx = probs[0][0]  # take the one with highest prob
                 input.fill_(word_idx)
 
             word = corpus.dictionary.idx2word[word_idx]
